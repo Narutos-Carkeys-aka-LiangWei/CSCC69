@@ -250,7 +250,7 @@ void (*orig_exit_group)(int);
  * Don't forget to call the original exit_group.
  */
 void my_exit_group(int status) {
-	spin_trylock(&pidlist_lock);
+	while (!spin_trylock(&pidlist_lock));
 	del_pid(current->pid);
 	spin_unlock(&pidlist_lock);
 	(*orig_exit_group)(status);
@@ -388,7 +388,7 @@ long (*orig_custom_syscall)(void);
  * - Ensure synchronization as needed.
  */
 static int init_function(void) {
-	spin_trylock(&calltable_lock);
+	while (!spin_trylock(&calltable_lock));
 	orig_custom_syscall = sys_call_table[MY_CUSTOM_SYSCALL];
 	orig_exit_group = sys_call_table[__NR_exit_group];
 	set_addr_rw((unsigned long) sys_call_table);
@@ -413,7 +413,7 @@ static int init_function(void) {
  * - Ensure synchronization, if needed.
  */
 static void exit_function(void) {
-	spin_trylock(&calltable_lock);
+	while (!spin_trylock(&calltable_lock));
 	set_addr_rw((unsigned long) sys_call_table);
 	sys_call_table[MY_CUSTOM_SYSCALL] = orig_custom_syscall;
 	sys_call_table[__NR_exit_group] = orig_exit_group;
