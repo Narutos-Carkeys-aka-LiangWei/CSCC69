@@ -250,7 +250,7 @@ void (*orig_exit_group)(int);
  * Don't forget to call the original exit_group.
  */
 void my_exit_group(int status) {
-	while (!spin_trylock(&pidlist_lock));
+	spin_lock(&pidlist_lock);
 	del_pid(current->pid);
 	spin_unlock(&pidlist_lock);
 	(*orig_exit_group)(status);
@@ -277,8 +277,8 @@ void my_exit_group(int status) {
  */
 asmlinkage long interceptor(struct pt_regs reg) {
 	/*
-	if (check_pid_monitored(syscall?, current->pid)) {
-		log_message(ax, bx, cx, dx, si, di, bp)
+	if (check_pid_monitored(reg.ax, current->pid)) {
+		log_message(current->pid, reg.ax, reg.bx, reg.cx, reg.dx, reg.si, reg.di, reg.bp)
 	}
 	run orig function
 
@@ -339,14 +339,24 @@ asmlinkage long interceptor(struct pt_regs reg) {
  */
 asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 	/*
-	verify syscall
-	verify pid
+	//verify syscall
+	if (syscall < 1 || syscall > NR_syscalls) {
+		return EINVAL;
+	}
+	//verify pid
+	if (pid == 0) {
+		
+	} else if (pid_task(find_vpid(pid), PIDTYPE_PID) == null || pid < 0) {
+		return EINVAL;
+	}
 	switch (cmd) {
 		case REQUEST_SYSCALL_INTERCEPT :
-			check if root
+			//check if root
+			if (current_uid() == 0) {
 			check if not intercepted
 		case REQUEST_SYSCALL_RELEASE :
-			check if root
+			//check if root
+			if (current_uid() == 0) {
 			check if is intercepted
 		case REQUEST_START_MONITORING :
 			check if root
@@ -388,7 +398,7 @@ long (*orig_custom_syscall)(void);
  * - Ensure synchronization as needed.
  */
 static int init_function(void) {
-	while (!spin_trylock(&calltable_lock));
+	spin_lock(&calltable_lock);
 	orig_custom_syscall = sys_call_table[MY_CUSTOM_SYSCALL];
 	orig_exit_group = sys_call_table[__NR_exit_group];
 	set_addr_rw((unsigned long) sys_call_table);
@@ -413,7 +423,7 @@ static int init_function(void) {
  * - Ensure synchronization, if needed.
  */
 static void exit_function(void) {
-	while (!spin_trylock(&calltable_lock));
+	spin_lock(&calltable_lock);
 	set_addr_rw((unsigned long) sys_call_table);
 	sys_call_table[MY_CUSTOM_SYSCALL] = orig_custom_syscall;
 	sys_call_table[__NR_exit_group] = orig_exit_group;
