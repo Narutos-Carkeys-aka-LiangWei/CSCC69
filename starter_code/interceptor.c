@@ -276,15 +276,12 @@ void my_exit_group(int status) {
  * - Don't forget to call the original system call, so we allow processes to proceed as normal.
  */
 asmlinkage long interceptor(struct pt_regs reg) {
-	/*
 	if (check_pid_monitored(reg.ax, current->pid)) {
-		log_message(current->pid, reg.ax, reg.bx, reg.cx, reg.dx, reg.si, reg.di, reg.bp)
+		log_message(current->pid, reg.ax, reg.bx, reg.cx, reg.dx, reg.si, reg.di, reg.bp);
 	}
-	run orig function
+	//run orig function
+	(*table[reg.ax].f)(reg);
 
-
-
-	*/
 	return 0; // Just a placeholder, so it compiles with no warnings!
 }
 
@@ -355,13 +352,18 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
 			//check if root
 			if (current_uid() != 0) {
 				return -EPERM;
+			} else if (table[syscall].intercepted == 1) {
+				return -EBUSY;
 			}
-			//check if not intercepted
+			table[syscall].intercepted = 1;
 		case REQUEST_SYSCALL_RELEASE :
 			//check if root
 			if (current_uid() != 0) {
 				return -EPERM;
+			} else if (table[syscall].intercepted == 0) {
+				return -EINVAL;
 			}
+			table[syscall].intercepted = 1;
 	}
 			//check if is intercepted
 	/*
@@ -409,8 +411,10 @@ static int init_function(void) {
 	orig_custom_syscall = sys_call_table[MY_CUSTOM_SYSCALL];
 	orig_exit_group = sys_call_table[__NR_exit_group];
 	set_addr_rw((unsigned long) sys_call_table);
-	sys_call_table[MY_CUSTOM_SYSCALL] = &my_syscall;
-	sys_call_table[__NR_exit_group] = &my_exit_group;
+	sys_call_table[MY_CUSTOM_SYSCALL] = my_syscall;
+	table[MY_CUSTOM_SYSCALL].intercepted = 1;
+	sys_call_table[__NR_exit_group] = my_exit_group;
+	table[__NR_exit_group].intercepted = 1;
 	//my_syscall(REQUEST_SYSCALL_INTERCEPT, MY_CUSTOM_SYSCALL, 0);
 
 
