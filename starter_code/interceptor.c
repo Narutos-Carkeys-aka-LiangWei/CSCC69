@@ -250,10 +250,10 @@ void (*orig_exit_group)(int);
  * Don't forget to call the original exit_group.
  */
 void my_exit_group(int status) {
-	spin_lock(&pidlist_lock);
-	del_pid(current->pid);
-	spin_unlock(&pidlist_lock);
-	(*orig_exit_group)(status);
+	//spin_lock(&pidlist_lock);
+	//del_pid(current->pid);
+	//spin_unlock(&pidlist_lock);
+	//(*orig_exit_group)(status);
 }
 //----------------------------------------------------------------
 
@@ -338,26 +338,33 @@ asmlinkage long interceptor(struct pt_regs reg) {
  *   you might be holding, before you exit the function (including error cases!).  
  */
 asmlinkage long my_syscall(int cmd, int syscall, int pid) {
-	/*
+	
 	//verify syscall
 	if (syscall < 1 || syscall > NR_syscalls) {
-		return EINVAL;
+		return -EINVAL;
 	}
 	//verify pid
 	if (pid == 0) {
 		
-	} else if (pid_task(find_vpid(pid), PIDTYPE_PID) == null || pid < 0) {
-		return EINVAL;
+	} else if (pid_task(find_vpid(pid), PIDTYPE_PID) == NULL || pid < 0) {
+		return -EINVAL;
 	}
+	
 	switch (cmd) {
 		case REQUEST_SYSCALL_INTERCEPT :
 			//check if root
-			if (current_uid() == 0) {
-			check if not intercepted
+			if (current_uid() != 0) {
+				return -EPERM;
+			}
+			//check if not intercepted
 		case REQUEST_SYSCALL_RELEASE :
 			//check if root
-			if (current_uid() == 0) {
-			check if is intercepted
+			if (current_uid() != 0) {
+				return -EPERM;
+			}
+	}
+			//check if is intercepted
+	/*
 		case REQUEST_START_MONITORING :
 			check if root
 				do thing
