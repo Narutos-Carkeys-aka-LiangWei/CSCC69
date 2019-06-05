@@ -250,11 +250,11 @@ void (*orig_exit_group)(int);
  * Don't forget to call the original exit_group.
  */
 void my_exit_group(int status) {
-    spin_lock(&pidlist_lock); //***
+    spin_lock(&pidlist_lock);
     
     del_pid(current->pid);
     
-    spin_unlock(&pidlist_lock); //***
+    spin_unlock(&pidlist_lock);
     
     (*orig_exit_group)(status);
 }
@@ -343,46 +343,80 @@ asmlinkage long my_syscall(int cmd, int syscall, int pid) {
     }
     //verify pid
     if (pid == 0) {
-        
+        // Special case: pid == 0 represents all pids
     } else if (pid_task(find_vpid(pid), PIDTYPE_PID) == NULL || pid < 0) {
         return -EINVAL;
     }
-    
+    // intercept checks
+    if ((cmd == REQUEST_SYSCALL_INTERCEPT || cmd == REQUEST_SYSCALL_RELEASE) && current_uid() != 0) {
+        return -EPERM;
+    }
+    // monitor checks
+    if ((cmd == REQUEST_START_MONITORING || cmd == REQUEST_STOP_MONITORING) && current_uid() != 0) {
+        check_pid_from_list(pid, current->pid);
+        if (pid == 0) {
+            return -EPERM;
+        }
+    }
+
+    spin_lock(&pidlist_lock);
+
+    printk("Syscall :%d:\n", syscall);
     switch (cmd) {
         case REQUEST_SYSCALL_INTERCEPT :
-            //check if root
-            if (current_uid() != 0) {
-                return -EPERM;
-            } else if (table[syscall].intercepted == 1) {
+            printk("Intercept :%d:\n", table[syscall].intercepted);
+            if (table[syscall].intercepted == 1) {
+                spin_unlock(&pidlist_lock);
                 return -EBUSY;
             }
             table[syscall].intercepted = 1;
+
+            spin_lock(&calltable_lock);
+
+            set_addr_rw((unsigned long) sys_call_table);
+            sys_call_table[syscall] = interceptor;
+            set_addr_ro((unsigned long) sys_call_table);
+
+            spin_unlock(&calltable_lock);
+            break;
+
         case REQUEST_SYSCALL_RELEASE :
-            //check if root
-            if (current_uid() != 0) {
-                return -EPERM;
-            } else if (table[syscall].intercepted == 0) {
+            printk("Release :%d:\n", table[syscall].intercepted);
+            if (table[syscall].intercepted == 0) {
+                spin_unlock(&pidlist_lock);
                 return -EINVAL;
             }
-            table[syscall].intercepted = 1;
-    }
-            //check if is intercepted
-    /*
+            table[syscall].intercepted = 0;
+
+            spin_lock(&calltable_lock);
+
+            set_addr_rw((unsigned long) sys_call_table);
+            sys_call_table[syscall] = table[syscall].f;
+            set_addr_ro((unsigned long) sys_call_table);
+
+            spin_unlock(&calltable_lock);
+
+            destroy_list(syscall);
+            break;
+
+    }/*
         case REQUEST_START_MONITORING :
-            check if root
-                do thing
-            else
-                check if pid requested by owned by caller
-                check if pid = 0 and caller not root
+            if (table[syscall].monitored > 0) {
+                return -EBUSY;
+            }
+            if (current_uid() == 0 && pid == 0) {
+                table[syscall].monitored = 2;
+            } else if
                     add_pid_sysc(pid, syscall);
         case REQUEST_STOP_MONITORING :
-            check if root
-                do thing
-            else
-                check if pid requested by owned by caller
-                check if pid = 0 and caller not root
+            if (table[syscall].monitored == 0) {
+                return -EINVAL;
+            }
                     del_pid_sysc(pid, syscall)
-    */
+    }*/
+
+    spin_unlock(&pidlist_lock);
+
     return 0;
 }
 
@@ -410,9 +444,9 @@ long (*orig_custom_syscall)(void);
 static int init_function(void) {
     int i = 0;
 
-    spin_lock(&calltable_lock); //+++
+    spin_lock(&calltable_lock);
     
-    spin_lock(&pidlist_lock); //***
+    spin_lock(&pidlist_lock);
     
     for (i = 0; i < NR_syscalls + 1; i++) {
         table[i].f = sys_call_table[i];
@@ -421,10 +455,10 @@ static int init_function(void) {
         table[i].listcount = 0;
         INIT_LIST_HEAD(&table[i].my_list);
     }
-    table[MY_CUSTOM_SYSCALL].intercepted = 1;
-    table[__NR_exit_group].intercepted = 1;
+    //table[MY_CUSTOM_SYSCALL].intercepted = 1;
+    //table[__NR_exit_group].intercepted = 1;
     
-    spin_unlock(&pidlist_lock); //***
+    spin_unlock(&pidlist_lock);
     
     orig_custom_syscall = sys_call_table[MY_CUSTOM_SYSCALL];
     orig_exit_group = sys_call_table[__NR_exit_group];
@@ -436,7 +470,7 @@ static int init_function(void) {
     
     set_addr_ro((unsigned long) sys_call_table);
     
-    spin_unlock(&calltable_lock); //+++
+    spin_unlock(&calltable_lock);
     return 0;
 }
 
@@ -453,23 +487,24 @@ static int init_function(void) {
 static void exit_function(void) {
     int i = 0;
 
-    spin_lock(&calltable_lock); //+++
+    spin_lock(&calltable_lock);
     
     set_addr_rw((unsigned long) sys_call_table);
     
-    spin_lock(&pidlist_lock); //***
+    spin_lock(&pidlist_lock);
     
     for (i = 0; i < NR_syscalls + 1; i++) {
         sys_call_table[i] = table[i].f;
+        destroy_list(i);
     }
     sys_call_table[MY_CUSTOM_SYSCALL] = orig_custom_syscall;
     sys_call_table[__NR_exit_group] = orig_exit_group;
     
-    spin_unlock(&pidlist_lock); //***
+    spin_unlock(&pidlist_lock);
     
     set_addr_ro((unsigned long) sys_call_table);
     
-    spin_unlock(&calltable_lock); //+++
+    spin_unlock(&calltable_lock);
 }
 
 module_init(init_function);
